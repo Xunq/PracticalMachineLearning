@@ -1,0 +1,97 @@
+---
+title: "Prediction of exercise manner with gradient boost"
+author: "Xun Qiu"
+date: "March 25, 2016"
+output: html_document
+---
+
+### 1. Background
+In this report, models are build to predict people's exercise manner (among class A to E) using data from accelerometers on belt,forearm,arm and dumbbell of 6 participants. Gradient boost regression model together with 5-fold cross validation have been used for the model training. 
+
+
+### 2. Model Description
+The "caret" package in R have been used for model training and prediction. In the beginning of the analysis, the original training data set is divided into a training set (with 70% of original data) and testing (with the rest 30% of original training data).
+```{r, eval=FALSE}
+set.seed(314)
+intrain<-createDataPartition(y=pmltrain$classe,
+                             p=0.7,
+                             list=FALSE)
+training<-pmltrain[intrain,]
+testing<-pmltrain[-intrain,]
+
+```
+
+
+#### 2.1 Feature selection and pre-processing
+The original training data contains 159 features, including measurements from accelerometers on belt, forearm, arm and dumbbell (a total of 13x4 = 52 predictors), and other statistical properties of the measurements and time info.
+
+After some preliminary exploratory analysis, the 52 columns containing measurements for belt/forearm/arm/dumbbell are chosen as the predictors in model training. Other information are either considered as irrelevant with the exercise manner (6 columns on time/user_name/window), or discarded due to the large portion of missing values (101 columns with over 80% NAs). 
+
+
+
+#### 2.2 Model training
+A gradient boost regression model is used for building the multi-class classifier. There are four tuning parameters for the gbm model in caret, and a 5-fold cross validation is used in the training process to find the best combination. To reduce computational complexity, two parameters are fixed to start with: shrinkage , which controls how quickly the algorithm adapts,is set to 0.1, and n.minobsinnode (the mininum number of training set samples in a node to commence splitting) is set to 10. The n.trees (number of iterations) is simulated from 100 to 1500 with a grid of 100, and the interaction.depth (controlling how deep a tree grows) is simulated using 1, 5, or 9. 
+
+The code for fitting the model is shown below:
+```{r, echo=FALSE, message=FALSE}
+library(caret)
+```
+
+```{r, eval=FALSE, warning=FALSE}
+fitcontrol<-trainControl(method="cv",
+                         number=5)
+
+gbmGrid<-expand.grid(interaction.depth=c(1,5,9),
+                     n.trees=seq(2,30,by=2)*50,
+                     shrinkage = 0.1,
+                     n.minobsinnode = 10)
+set.seed(314)
+gbmfit<-train(classe~.,
+              data=trainTrans,
+              method="gbm",
+              trControl=fitcontrol,
+              verbose=FALSE,
+              tuneGrid=gbmGrid)
+```
+Figure below illustrates the relationship between tuning parameters and model performance using accuracy obtained from cross-validation.
+
+```{r, echo=FALSE}
+load("gbmfit_1.RData")
+plot(gbmfit)
+```
+
+It can be seen that with a given boosting iteration, the accuracy with tree depth 5 or 9 is close, and are both much better than that with tree depth 1. Further, the accuracy exhibits a motonomous increase with the increase of iterations (under the given tuning grid). 
+
+Based on the cross validation results, the final values chosen for the gbm model is n.tree 1500, iteraction.depth 9, shrinkage 0.1 and n.minobsinnode 10, which gives a cross-validated accuracy of 99.55%. Since it is quite good, a further fine tune of the parameters is not performed here.
+
+####2.3 Prediction and model evaluation
+The out of sample error of the final model is estimated using the testing set (30% of the original training data). As shown below, the accuracy is over 99.5%, which is consistent with the cross validation result.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pmltrain<-read.csv("pml-training.csv")
+pmltrain<-pmltrain[,-1]
+set.seed(314)
+intrain<-createDataPartition(y=pmltrain$classe,
+                             p=0.7,
+                             list=FALSE)
+training<-pmltrain[intrain,]
+testing<-pmltrain[-intrain,]
+
+training[training==""]<-NA
+
+training_new<-training[,colSums(is.na(training))==0]
+testing_new<-testing[,colSums(is.na(training))==0]
+
+training_use <- training_new[,-c(1:6)]
+testing_use <- testing_new[,-c(1:6)]
+
+preobj<-preProcess(training_use[,-53],method=c("center","scale"))
+trainTrans<-predict(preobj,training_use)
+testTrans<-predict(preobj,testing_use)
+
+pred_gbm<-predict(gbmfit,testTrans)
+confusionMatrix(pred_gbm,testTrans$classe)
+```
+
+### 3. Conclusions
+In this report, the gradient boost regression method is used to build a multi-class classifier for classifying people's exercise manner. Parameters are tuned base on cross-validation. Results show that the gbm method provides a good estimation of the classes, with the out-of-sample error rate less than 0.5%. 
